@@ -1,0 +1,132 @@
+import pandas as pd
+from sqlalchemy import create_engine, text, insert, update, Table, Column, MetaData,Integer, String, Float
+from operator import itemgetter
+import itertools
+import statsmodels.api as sm
+from statsmodels.tools import add_constant
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+from sklearn.pipeline import Pipeline
+import warnings
+
+
+def init_database():
+    Server = "lbx-sqlintel"
+    DatabaseName = "LBX_Market_Intelligence"
+    engine = create_engine(
+        "mssql://@"
+        + Server
+        + "/"
+        + DatabaseName
+        + "?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server"
+    )
+    return engine
+
+
+class Forecast:
+    DependentVar = []
+    IndependentVars = []
+    ID = 0
+    Rsquared = 0
+    Score = 0
+    Coefficients = []
+    ModelUsed = []
+    Shifts = []
+    ModelPipeline = []
+    RawData = []
+    ShiftedData = []
+    ShiftedTrainData = []
+    ShiftedPredictionData = []
+
+    def __init__(self, fcastid, Depvar, indepvars, shifts, pipe):
+        self.DependentVar = Depvar
+        self.IndependentVars = indepvars
+        self.Shifts = shifts
+        self.ModelPipeline = pipe
+        self.ID = fcastid
+
+    def Compute(self):
+        self.GetData()
+
+        X = self.ShiftedTrainData[list(self.IndependentVars)]
+        y = self.ShiftedTrainData[self.DependentVar]
+
+        Xtrain, Xtest, ytrain, ytest = train_test_split(
+            X, y, random_state=0, test_size=0.5
+        )
+        model = Pipeline(
+            [("scaler", StandardScaler()), ("regressor", LinearRegression())]
+        )
+        model.fit(Xtrain, ytrain)
+        ymodel = model.predict(Xtest)
+        self.Rsquared = r2_score(ytest, ymodel)
+        self.Coeffients = model.named_steps["regressor"].coef_
+        Xpredict = self.ShiftedPredictionData[list(self.IndependentVars)]
+        ypredict = model.predict(Xpredict)
+        self.ShiftedPredictionData[self.DependentVar + "_Fcast"] = ypredict
+
+    def num_samples(self):
+        return self.ForecastData.shape[0]
+
+    def GetData(self):
+        global df
+        columns = ("MonthsSince1900",) + (self.DependentVar,) + self.IndependentVars
+        # depvar_trend = DependentVar + "_trend"
+        # depvar_detrend = DependentVar + "_detrend"
+        # indepvar_trend = [s + "_trend" for s in IndependentVars]
+        # indepvar_detrend = [s + "_detrend" for s in IndependentVars]
+        # indepvar_detrend_scaled = [s + "_detrend_scaled" for s in IndependentVars]
+
+        # copy the main dataframe to get just the columns we need
+        self.RawData = df[list(columns)].copy()
+        self.ShiftedData = self.RawData.copy()
+        # Add rows to data to allow it to be shifted upward
+        # RowsToAdd = abs(min(self.Shifts))
+        # maxmonths = self.ShiftedData["MonthsSince1900"].max()
+        # for x in range(maxmonths, maxmonths + RowsToAdd + 1, 1):
+        #     self.ShiftedData.append({"MonthsSince1900": x})
+
+        # # shift all of the independent variable columns
+        for var, shift in zip(self.IndependentVars, self.Shifts):
+            self.ShiftedData[var] = self.ShiftedData[var].shift(shift)
+
+        self.ShiftedTrainData = self.ShiftedData.copy()
+        self.ShiftedTrainData.dropna(inplace=True)
+        self.ShiftedPredictionData = (
+            self.ShiftedData.drop([self.DependentVar], axis=1).dropna().copy()
+        )
+
+    def WriteForecast(self):
+        metadata_obj = MetaData()
+        user_table = Table(
+            "lbx_forecasts",
+            metadata_obj,
+            Column("ID", Integer, primary_key=True),
+            Column("DependentVar", String(30)),
+            Column("IndependentVars", String(500)),
+            Column("Rsquared", Float),
+            Column("Shifts", String(100))
+
+        )
+
+        stmt = insert(user_table).values(
+            DependentVar=self.DependentVar, IndependentVars=str(self.IndependentVars),Shifts = str(self.Shifts), Rsquared = self.Rsquared
+        )
+        print(stmt)
+
+
+midb = init_database()
+
+query = "select * from fcast_base_data_pivoted  where year > 1995 order by MonthsSince1900 asc"
+df = pd.read_sql_query(sql=text(query), con=midb.connect())
+fcast = Forecast(
+    1,
+    "RetailUnits",
+    ("EFFR",),
+    (4,),
+    [("scaler", StandardScaler()), ("regressor", LinearRegression())],
+)
+fcast.Compute()
+fcast.WriteForecast()

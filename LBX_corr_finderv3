@@ -1,0 +1,8 @@
+def ProcessDependentVariables()
+
+def ProcessCombinations(min, max):
+    for combos in range(min, max, 1):
+        ProcessDependentVariables()
+
+def __MAIN__():
+    ProcessCombinations(1, 4)
