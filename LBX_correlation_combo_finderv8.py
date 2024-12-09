@@ -5,7 +5,7 @@ import pandas as pd
 import datetime
 from sqlalchemy import create_engine, text
 import itertools
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
@@ -52,9 +52,13 @@ target_rsquared = 0
 # set variables used to define what analysis takes place
 PipelineContents = [
     ("scaler", StandardScaler()),
-    ("regressor", LinearRegression(fit_intercept=True)),
+    ("regressor", Lasso(alpha=2.0,max_iter=100000,fit_intercept=True)),
 ]
-
+# set variables used to define what analysis takes place
+PipelineContents = [
+    ("scaler", StandardScaler()),
+    ("regressor", LinearRegression()),
+]
 # These variables define how the system runs
 # starting data year defines the minimum year of data that is selected for all variables.
 starting_data_year = "1995"
@@ -66,7 +70,7 @@ SaveParameters = False
 SavePredictions = True
 
 # Set to True to drop and re-create the datatables
-ManageTables = "Drop"
+ManageTables = ""
 
 # Shift ranges define whether independent variables will be shifted before analysis.
 # A shift of -12 means January, 2023 independent variables will be correlated to January 2024 dependent variable data
@@ -101,7 +105,7 @@ def init_database():
 
 
 def get_data(engine):
-    global dependent_vars, independent_vars, df, dependent_vars_12mo_avg, independent_vars_12mo, independent_vars_no_avg, independent_vars_no_util, independent_vars_early
+    global dependent_vars, independent_vars_early_no_avg, independent_vars, df, dependent_vars_12mo_avg, independent_vars_12mo, independent_vars_no_avg, independent_vars_no_util, independent_vars_early
 
     query = (
         "select * from fcast_base_data_pivoted  where year >= "
@@ -143,6 +147,13 @@ def get_data(engine):
     independent_vars_early = pd.read_sql_query(sql=text(query), con=engine.connect())[
         "Variable"
     ]
+
+    query = "select distinct ItemName as Variable from fcast_base_data_unpivoted_tmp a where Year = 1995 and ItemVarType = 'I' and ItemName not like '%mo_avg%' and ItemName not like 'WPS0811%'"
+
+    independent_vars_early_no_avg = pd.read_sql_query(sql=text(query), con=engine.connect())[
+        "Variable"
+    ]
+
 
     query = (
         "select distinct ItemName as Variable from fcast_base_data_unpivoted_tmp where year >= "
@@ -285,7 +296,7 @@ def process_var_list(
         shift_range, repeat=len(independent_variable_list)
     )
     shift_combinations = list(shift_combinations)
-    mape_limit = 2
+    mape_limit = 10
 
     for shifts in shift_combinations:
         modelid += 1
@@ -547,10 +558,14 @@ find_results_all_vars(
 )
 process_note = "Independent vars with averages available in 1995"
 find_results_all_vars(shift_range, dependent_vars, independent_vars_early[1:].tolist())
+
+process_note = "Independent vars with NO averages available in 1995, less WPS0811, added LBX retails"
+find_results_all_vars(shift_range, ['NARLBXRetailUnits_12mo_avg'], independent_vars_early_no_avg[1:].tolist())
+
 process_note = "Independent vars with averages"
 find_results_all_vars(shift_range, dependent_vars, independent_vars[1:].tolist())
 
-process_note = "independent vars per category all same shift"
-find_results_by_category_single_shifts(shift_range, dependent_vars, VarCategories)
-process_note = "one independent var per limited category each shifting independently"
-find_results_by_category_shifts(shift_range, dependent_vars, VarCategories)
+# process_note = "independent vars per category all same shift"
+# find_results_by_category_single_shifts(shift_range, dependent_vars, VarCategories)
+# process_note = "one independent var per limited category each shifting independently"
+# find_results_by_category_shifts(shift_range, dependent_vars, VarCategories)
