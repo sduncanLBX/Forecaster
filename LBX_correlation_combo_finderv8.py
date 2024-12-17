@@ -52,7 +52,7 @@ target_rsquared = 0
 # set variables used to define what analysis takes place
 PipelineContents = [
     ("scaler", StandardScaler()),
-    ("regressor", Lasso(alpha=2.0,max_iter=100000,fit_intercept=True)),
+    ("regressor", Lasso(alpha=2.0, max_iter=100000, fit_intercept=True)),
 ]
 # set variables used to define what analysis takes place
 PipelineContents = [
@@ -70,7 +70,7 @@ SaveParameters = False
 SavePredictions = True
 
 # Set to True to drop and re-create the datatables
-ManageTables = ""
+ManageTables = "Clean"
 
 # Shift ranges define whether independent variables will be shifted before analysis.
 # A shift of -12 means January, 2023 independent variables will be correlated to January 2024 dependent variable data
@@ -150,10 +150,9 @@ def get_data(engine):
 
     query = "select distinct ItemName as Variable from fcast_base_data_unpivoted_tmp a where Year = 1995 and ItemVarType = 'I' and ItemName not like '%mo_avg%' and ItemName not like 'WPS0811%'"
 
-    independent_vars_early_no_avg = pd.read_sql_query(sql=text(query), con=engine.connect())[
-        "Variable"
-    ]
-
+    independent_vars_early_no_avg = pd.read_sql_query(
+        sql=text(query), con=engine.connect()
+    )["Variable"]
 
     query = (
         "select distinct ItemName as Variable from fcast_base_data_unpivoted_tmp where year >= "
@@ -547,25 +546,31 @@ get_category_variables(midb)
 # drop the tables (there's a switch inside the function to see if we actually drop)
 manage_tables(midb)
 
-if ManageTables != "Drop":
-    modelid = get_last_modelid(midb)
+# if ManageTables != "Drop":
+#     modelid = get_last_modelid(midb)
 
-process_note = "Independent vars without averages"
+process_note = "IV No Avg"
 find_results_all_vars(shift_range, dependent_vars, independent_vars_no_avg[1:].tolist())
-process_note = "Independent vars with averages no utilization"
+
+process_note = "IV w/Avg No util"
 find_results_all_vars(
     shift_range, dependent_vars, independent_vars_no_util[1:].tolist()
 )
-process_note = "Independent vars with averages available in 1995"
+process_note = "IV w/Avg avail 1995"
 find_results_all_vars(shift_range, dependent_vars, independent_vars_early[1:].tolist())
 
-process_note = "Independent vars with NO averages available in 1995, less WPS0811, added LBX retails"
-find_results_all_vars(shift_range, ['NARLBXRetailUnits_12mo_avg'], independent_vars_early_no_avg[1:].tolist())
+process_note = "IV no Avg avail 1995, less WPS0811"
+find_results_all_vars(
+    shift_range,
+    dependent_vars,
+    independent_vars_early_no_avg[1:].tolist(),
+)
 
-process_note = "Independent vars with averages"
+process_note = "IV w/avg"
 find_results_all_vars(shift_range, dependent_vars, independent_vars[1:].tolist())
 
-# process_note = "independent vars per category all same shift"
-# find_results_by_category_single_shifts(shift_range, dependent_vars, VarCategories)
-# process_note = "one independent var per limited category each shifting independently"
-# find_results_by_category_shifts(shift_range, dependent_vars, VarCategories)
+process_note = "1 IV per cat 1 shift"
+find_results_by_category_single_shifts(shift_range, dependent_vars, VarCategories)
+
+process_note = "1 IV per cat indep shift"
+find_results_by_category_shifts(shift_range, dependent_vars, VarCategories)
